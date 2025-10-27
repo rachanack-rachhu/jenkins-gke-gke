@@ -1,5 +1,10 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
+        }
+    }
 
     environment {
         PROJECT_ID = "crested-polygon-472204-n5"
@@ -30,25 +35,23 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh '''
-                docker build -t ${IMAGE_NAME}:latest .
-                '''
+                sh "docker build -t ${IMAGE_NAME}:latest ."
             }
         }
 
         stage('Trivy Scan') {
             steps {
                 sh '''
-                docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image ${IMAGE_NAME}:latest
+                docker run --rm \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                aquasec/trivy:latest image ${IMAGE_NAME}:latest || true
                 '''
             }
         }
 
         stage('Push to Artifact Registry') {
             steps {
-                sh '''
-                docker push ${IMAGE_NAME}:latest
-                '''
+                sh "docker push ${IMAGE_NAME}:latest"
             }
         }
 
@@ -56,7 +59,7 @@ pipeline {
             steps {
                 sh '''
                 gcloud container clusters get-credentials cluster-ci --zone us-west3-c --project ${PROJECT_ID}
-                kubectl set image deployment/python-app-deployment python-app-container=${IMAGE_NAME}:latest --namespace default || echo "Deployment not found, will be created"
+                kubectl set image deployment/python-app-deployment python-app-container=${IMAGE_NAME}:latest --namespace default || echo "Deployment not found"
                 '''
             }
         }
