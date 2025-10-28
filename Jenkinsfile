@@ -1,15 +1,15 @@
 pipeline {
     agent {
         docker {
-            image 'gcr.io/google.com/cloudsdktool/cloud-sdk:latest'
+            image 'gcr.io/cloud-builders/docker'
             args '-v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
 
     environment {
         PROJECT_ID = "crested-polygon-472204-n5"
-        REGION = "us-west1"     // ✅ match Artifact Registry region
-        ZONE = "us-west3-c"     // ✅ GKE zone
+        REGION = "us-west1"
+        ZONE = "us-west3-c"
         REPO_NAME = "python-app-repo"
         IMAGE_NAME = "us-west1-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/python-app"
         CLUSTER_NAME = "cluster-ci"
@@ -24,9 +24,20 @@ pipeline {
             }
         }
 
+        stage('Install gcloud') {
+            steps {
+                sh '''
+                apt-get update && apt-get install -y curl apt-transport-https ca-certificates gnupg
+                curl -sSL https://sdk.cloud.google.com | bash -s -- --disable-prompts
+                export PATH=$PATH:/root/google-cloud-sdk/bin
+                '''
+            }
+        }
+
         stage('Auth to GCP') {
             steps {
                 sh '''
+                export PATH=$PATH:/root/google-cloud-sdk/bin
                 echo "$GCP_SA_KEY" > sa.json
                 gcloud auth activate-service-account --key-file=sa.json
                 gcloud config set project ${PROJECT_ID}
@@ -41,16 +52,6 @@ pipeline {
             }
         }
 
-        stage('Trivy Scan (Optional)') {
-            steps {
-                sh '''
-                docker run --rm \
-                -v /var/run/docker.sock:/var/run/docker.sock \
-                aquasec/trivy:latest image ${IMAGE_NAME}:latest || true
-                '''
-            }
-        }
-
         stage('Push to Artifact Registry') {
             steps {
                 sh "docker push ${IMAGE_NAME}:latest"
@@ -60,15 +61,11 @@ pipeline {
         stage('Deploy to GKE') {
             steps {
                 sh '''
+                export PATH=$PATH:/root/google-cloud-sdk/bin
                 gcloud container clusters get-credentials ${CLUSTER_NAME} --zone ${ZONE} --project ${PROJECT_ID}
 
-                # If deployment does not exist, create it
-                if ! kubectl get deployment python-app-deployment --namespace default > /dev/null 2>&1; then
-                  kubectl create deployment python-app-deployment --image=${IMAGE_NAME}:latest --namespace default
-                  kubectl expose deployment python-app-deployment --type=LoadBalancer --port 80 --target-port 5000 --namespace default
-                else
-                  kubectl set image deployment/python-app-deployment python-app-container=${IMAGE_NAME}:latest --namespace default
-                fi
+                kubectl apply -f k8s/deployment.yaml
+                kubectl apply -f k8s/service.yaml
                 '''
             }
         }
