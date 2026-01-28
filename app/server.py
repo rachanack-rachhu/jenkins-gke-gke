@@ -5,7 +5,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def index():
-    return "Hello from GKE CI/CD — Flask!\n jenkins completed"
+    return "Hello from GKE CI/CD — Flask!\n jenkins completed and pull"
 
 @app.route('/info')
 def info():
